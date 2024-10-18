@@ -269,6 +269,7 @@ namespace gtsam {
   typename BayesTree<CLIQUE>::sharedConditional
     BayesTree<CLIQUE>::marginalFactor(Key j, const Eliminate& function) const
   {
+    std::cout << "marginalFactor " << DefaultKeyFormatter(j) << std::endl;
     gttic(BayesTree_marginalFactor);
 
     // get clique containing Key j
@@ -277,12 +278,31 @@ namespace gtsam {
     // calculate or retrieve its marginal P(C) = P(F,S)
     FactorGraphType cliqueMarginal = clique->marginal2(function);
 
-    // Now, marginalize out everything that is not variable j
-    BayesNetType marginalBN =
-        *cliqueMarginal.marginalMultifrontalBayesNet(Ordering{j}, function);
+    for (auto factor : cliqueMarginal) {
+      if (auto conditional =
+              boost::dynamic_pointer_cast<ConditionalType>(factor)) {
+        conditional->ConditionalType::BaseConditional::print();
+      } else {
+        factor->print();
+      }
+    }
 
-    // The Bayes net should contain only one conditional for variable j, so return it
-    return marginalBN.front();
+    // Now, marginalize out everything that is not variable j
+    try {
+      BayesNetType marginalBN =
+          *cliqueMarginal.marginalMultifrontalBayesNet(Ordering{j}, function);
+
+      // The Bayes net should contain only one conditional for variable j, so
+      // return it
+      return marginalBN.front();
+    } catch (std::exception &e) {
+      std::cout << "marginalFactor " << DefaultKeyFormatter(j) << " "
+                << e.what() << std::endl;
+
+      cliqueMarginal.print("cliqueMarginal");
+
+      throw;
+    }
   }
 
   /* ************************************************************************* */

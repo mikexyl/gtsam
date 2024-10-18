@@ -17,8 +17,10 @@
 */
 #pragma once
 
-#include <utility>
+#include "gtsam/base/types.h"
+#include "gtsam/inference/Key.h"
 #include <boost/shared_ptr.hpp>
+#include <utility>
 
 #include <gtsam/base/Testable.h>
 #include <gtsam/base/FastVector.h>

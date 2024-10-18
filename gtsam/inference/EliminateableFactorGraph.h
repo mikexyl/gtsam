@@ -223,9 +223,10 @@ namespace gtsam {
      *  @param variableIndex Optional pre-computed VariableIndex for the factor graph, if not
      *         provided one will be computed. */
     boost::shared_ptr<BayesNetType> marginalMultifrontalBayesNet(
-      boost::variant<const Ordering&, const KeyVector&> variables,
-      const Eliminate& function = EliminationTraitsType::DefaultEliminate,
-      OptionalVariableIndex variableIndex = boost::none) const;
+        boost::variant<const Ordering &, const KeyVector &> variables,
+        const Eliminate &function = EliminationTraitsType::DefaultEliminate,
+        OptionalVariableIndex variableIndex = boost::none,
+        boost::shared_ptr<BayesTreeType> *bayesTree = nullptr) const;
 
     /** Compute the marginal of the requested variables and return the result as a Bayes net.
      *  @param variables Determines the variables whose marginal to compute, if provided as an
@@ -238,10 +239,11 @@ namespace gtsam {
      *  @param variableIndex Optional pre-computed VariableIndex for the factor graph, if not
      *         provided one will be computed. */
     boost::shared_ptr<BayesNetType> marginalMultifrontalBayesNet(
-      boost::variant<const Ordering&, const KeyVector&> variables,
-      const Ordering& marginalizedVariableOrdering,
-      const Eliminate& function = EliminationTraitsType::DefaultEliminate,
-      OptionalVariableIndex variableIndex = boost::none) const;
+        boost::variant<const Ordering &, const KeyVector &> variables,
+        const Ordering &marginalizedVariableOrdering,
+        const Eliminate &function = EliminationTraitsType::DefaultEliminate,
+        OptionalVariableIndex variableIndex = boost::none,
+        boost::shared_ptr<BayesTreeType> *bayesTree = nullptr) const;
 
     /** Compute the marginal of the requested variables and return the result as a Bayes tree.  Uses
      *  COLAMD marginalization order by default

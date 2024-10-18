@@ -15,6 +15,7 @@
  * @author  Michael Kaess, Richard Roberts, Frank Dellaert
  */
 
+#include "gtsam/linear/GaussianBayesTree.h"
 #include <gtsam/inference/BayesTreeCliqueBase-inst.h>
 #include <gtsam/linear/VectorValues.h>
 #include <gtsam/linear/linearAlgorithms-inst.h>
@@ -26,6 +27,8 @@
 using namespace std;
 
 namespace gtsam {
+
+class GaussianBayesTree;
 
 // Instantiate base class
 template class BayesTreeCliqueBase<ISAM2Clique, GaussianFactorGraph>;
@@ -42,6 +45,9 @@ void ISAM2Clique::setEliminationResult(
   gradientContribution_ << -conditional_->R().transpose() *
                                conditional_->d(),
       -conditional_->S().transpose() * conditional_->d();
+
+  unusedTree_ = nullptr;
+  reducedGraph_ = FactorGraphType();
 }
 
 /* ************************************************************************* */
@@ -341,6 +347,157 @@ void ISAM2Clique::addGradientAtZero(VectorValues* g) const {
   for (const auto& child : children) {
     child->addGradientAtZero(g);
   }
+}
+
+ISAM2Clique::FactorGraphType
+ISAM2Clique::separatorMarginal(Eliminate function) const {
+  std::lock_guard<std::mutex> marginalLock(cachedSeparatorMarginalMutex_);
+  gttic(BayesTreeCliqueBase_separatorMarginal);
+  // Check if the Separator marginal was already calculated
+  if (!cachedSeparatorMarginal_) {
+    gttic(BayesTreeCliqueBase_separatorMarginal_cachemiss);
+
+    // If this is the root, there is no separator
+    if (parent_.expired() /*(if we're the root)*/) {
+      // we are root, return empty
+      FactorGraphType empty;
+      cachedSeparatorMarginal_ = empty;
+    } else {
+      derived_ptr parent(parent_.lock());
+
+      // The variables we want to keepSet are exactly the ones in S
+      KeyVector indicesS(this->conditional()->beginParents(),
+                         this->conditional()->endParents());
+
+      if (parent->reducedGraph_.size()) {
+        FactorGraphType siblingsSeparatorMarginal(parent->reducedGraph_);
+        KeyVector indicesSp, indicesSf;
+        for (auto key : indicesS) {
+          if (siblingsSeparatorMarginal.keys().exists(key)) {
+            indicesSp.push_back(key);
+          } else {
+            indicesSf.push_back(key);
+          }
+        }
+
+        auto separatorMarginal_Sp =
+            siblingsSeparatorMarginal.marginalMultifrontalBayesNet(
+                Ordering(indicesSp), function);
+
+        if (parent->unusedTree_) {
+          for (auto clique : parent->unusedTree_->nodes()) {
+            siblingsSeparatorMarginal.push_back(clique.second->conditional());
+            break;
+          }
+        }
+
+        gttic(BayesTreeCliqueBase_separatorMarginal_incremental);
+        boost::shared_ptr<BayesNetType> separatorMarginalInSiblings;
+        try {
+          separatorMarginalInSiblings =
+              siblingsSeparatorMarginal.marginalMultifrontalBayesNet(
+                  Ordering(indicesSf), function, boost::none,
+                  &parent->unusedTree_);
+        } catch (std::exception &e) {
+          std::cout << "Error in marginalMultifrontalBayesNet: " << e.what()
+                    << std::endl;
+          std::cout << "keys to marginalize: ";
+          for (auto key : indicesS) {
+            std::cout << DefaultKeyFormatter(key) << " ";
+          }
+          std::cout << std::endl;
+
+          for (auto factor : siblingsSeparatorMarginal) {
+            if (auto conditional =
+                    boost::dynamic_pointer_cast<ConditionalType>(factor)) {
+              conditional->ConditionalType::BaseConditional::print();
+            } else {
+              factor->print();
+            }
+          }
+          throw;
+        }
+        gttoc(BayesTreeCliqueBase_separatorMarginal_incremental);
+
+        separatorMarginalInSiblings->push_back(*separatorMarginal_Sp);
+        cachedSeparatorMarginal_.reset(*separatorMarginalInSiblings);
+        parent->reducedGraph_ = *separatorMarginalInSiblings;
+
+        // for (auto factor : *separatorMarginalInSiblings) {
+        //   if (auto conditional =
+        //           boost::dynamic_pointer_cast<ConditionalType>(factor)) {
+        //     conditional->ConditionalType::BaseConditional::print("p_sib(S):
+        //     ");
+        //   } else {
+        //     factor->print();
+        //   }
+        // }
+      } else {
+        // Flatten recursion in timing outline
+        gttoc(BayesTreeCliqueBase_separatorMarginal_cachemiss);
+        gttoc(BayesTreeCliqueBase_separatorMarginal);
+
+        // Obtain P(S) = \int P(Cp) = \int P(Fp|Sp) P(Sp)
+        // initialize P(Cp) with the parent separator marginal
+        FactorGraphType p_Cp(parent->separatorMarginal(function)); // P(Sp)
+
+        gttic(BayesTreeCliqueBase_separatorMarginal);
+        gttic(BayesTreeCliqueBase_separatorMarginal_cachemiss);
+
+        // std::cout << "p(S_parent): " << std::endl;
+        // for (auto factor : p_Cp) {
+        //   if (auto conditional =
+        //           boost::dynamic_pointer_cast<ConditionalType>(factor)) {
+        //     conditional->ConditionalType::BaseConditional::print();
+        //   } else {
+        //     factor->print();
+        //   }
+        // }
+
+        // now add the parent conditional
+        p_Cp += parent->conditional_; // P(Fp|Sp)
+        // parent->conditional_->ConditionalType::BaseConditional::print(
+        //     "p(F_parent|S_parent): ");
+
+        // this->conditional()->ConditionalType::BaseConditional::print(
+        //     "p(F|S): ");
+
+        // std::cout << "keys in p_Cp" << std::endl;
+        // for (auto key : p_Cp.keys()) {
+        //   std::cout << DefaultKeyFormatter(key) << " ";
+        // }
+        // std::cout << std::endl;
+
+        auto separatorMarginal = p_Cp.marginalMultifrontalBayesNet(
+            Ordering(indicesS), function, boost::none, &parent->unusedTree_);
+        cachedSeparatorMarginal_.reset(*separatorMarginal);
+        parent->reducedGraph_ = *separatorMarginal;
+      }
+    }
+  }
+
+  // return the shortcut P(S||B)
+  return *cachedSeparatorMarginal_; // return the cached version
+}
+
+ISAM2Clique::FactorGraphType ISAM2Clique::marginal2(Eliminate function) const {
+  if(this->reducedGraph_.size()) {
+    FactorGraphType p_C(this->reducedGraph_);
+    if(this->unusedTree_) {
+      for (auto clique : this->unusedTree_->nodes()) {
+        p_C.push_back(clique.second->conditional());
+        break;
+      }
+    }
+    return p_C;
+  }
+
+  gttic(BayesTreeCliqueBase_marginal2);
+  // initialize with separator marginal P(S)
+  FactorGraphType p_C = this->separatorMarginal(function);
+  // add the conditional P(F|S)
+  p_C += boost::shared_ptr<FactorType>(this->conditional_);
+  return p_C;
 }
 
 /* ************************************************************************* */

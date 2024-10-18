@@ -51,11 +51,13 @@ namespace gtsam {
   private:
     typedef BayesTreeCliqueBase<DERIVED, FACTORGRAPH> This;
     typedef DERIVED DerivedType;
-    typedef EliminationTraits<FACTORGRAPH> EliminationTraitsType;
     typedef boost::shared_ptr<This> shared_ptr;
     typedef boost::weak_ptr<This> weak_ptr;
+
+  protected:
     typedef boost::shared_ptr<DerivedType> derived_ptr;
     typedef boost::weak_ptr<DerivedType> derived_weak_ptr;
+    typedef EliminationTraits<FACTORGRAPH> EliminationTraitsType;
 
   public:
     typedef FACTORGRAPH FactorGraphType;
@@ -109,11 +111,18 @@ namespace gtsam {
     /// which is not true due to these mutable values. This is fixed by applying this mutex.
     mutable std::mutex cachedSeparatorMarginalMutex_;
 
+    /** return the marginal P(S) on the separator */
+    virtual FactorGraphType separatorMarginal(
+        Eliminate function = EliminationTraitsType::DefaultEliminate) const;
+
   public:
     sharedConditional conditional_;
     derived_weak_ptr parent_;
     FastVector<derived_ptr> children;
     int problemSize_;
+    boost::shared_ptr<typename EliminationTraitsType::BayesTreeType>
+        unusedTree_ = nullptr;
+    FactorGraphType reducedGraph_;
 
     bool is_root = false;
 
@@ -168,11 +177,8 @@ namespace gtsam {
     /** return the conditional P(S|Root) on the separator given the root */
     BayesNetType shortcut(const derived_ptr& root, Eliminate function = EliminationTraitsType::DefaultEliminate) const;
 
-    /** return the marginal P(S) on the separator */
-    FactorGraphType separatorMarginal(Eliminate function = EliminationTraitsType::DefaultEliminate) const;
-
     /** return the marginal P(C) of the clique, using marginal caching */
-    FactorGraphType marginal2(Eliminate function = EliminationTraitsType::DefaultEliminate) const;
+    virtual FactorGraphType marginal2(Eliminate function = EliminationTraitsType::DefaultEliminate) const;
 
     /**
      * This deletes the cached shortcuts of all cliques (subtree) below this clique.

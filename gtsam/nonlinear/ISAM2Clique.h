@@ -28,6 +28,8 @@
 
 namespace gtsam {
 
+class GaussianBayesTree;
+
 /**
  * Specialized Clique structure for ISAM2, incorporating caching and gradient
  * contribution
@@ -120,7 +122,15 @@ class GTSAM_EXPORT ISAM2Clique
    */
   void findAll(const KeySet& markedMask, KeySet* keys) const;
 
- private:
+  FactorGraphType separatorMarginal(Eliminate function) const override;
+
+  FactorGraphType
+  marginal2(Eliminate function = EliminationTraitsType::DefaultEliminate) const override;
+
+  boost::shared_ptr<GaussianFactorGraph::BayesTreeType> unusedTree_ = nullptr;
+  FactorGraphType reducedGraph_;
+
+private:
   /**
    * Check if clique was replaced, or if any parents were changed above the
    * threshold or themselves replaced.

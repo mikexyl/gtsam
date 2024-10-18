@@ -228,16 +228,17 @@ namespace gtsam {
   }
 
   /* ************************************************************************* */
-  template<class FACTORGRAPH>
-  boost::shared_ptr<typename EliminateableFactorGraph<FACTORGRAPH>::BayesNetType>
-    EliminateableFactorGraph<FACTORGRAPH>::marginalMultifrontalBayesNet(
-    boost::variant<const Ordering&, const KeyVector&> variables,
-    const Eliminate& function, OptionalVariableIndex variableIndex) const
-  {
+  template <class FACTORGRAPH>
+  boost::shared_ptr<
+      typename EliminateableFactorGraph<FACTORGRAPH>::BayesNetType>
+  EliminateableFactorGraph<FACTORGRAPH>::marginalMultifrontalBayesNet(
+      boost::variant<const Ordering &, const KeyVector &> variables,
+      const Eliminate &function, OptionalVariableIndex variableIndex,
+      boost::shared_ptr<BayesTreeType> *bayesTree) const {
     if(!variableIndex) {
       // If no variable index is provided, compute one and call this function again
       VariableIndex index(asDerived());
-      return marginalMultifrontalBayesNet(variables, function, index);
+      return marginalMultifrontalBayesNet(variables, function, index, bayesTree);
     } else {
       // No ordering was provided for the marginalized variables, so order them using constrained
       // COLAMD.
@@ -255,18 +256,19 @@ namespace gtsam {
       Ordering marginalVarsOrdering(totalOrdering.end() - nVars, totalOrdering.end());
 
       // Call this function again with the computed orderings
-      return marginalMultifrontalBayesNet(marginalVarsOrdering, marginalizationOrdering, function, *variableIndex);
+      return marginalMultifrontalBayesNet(marginalVarsOrdering, marginalizationOrdering, function, *variableIndex, bayesTree);
     }
   }
 
   /* ************************************************************************* */
-  template<class FACTORGRAPH>
-  boost::shared_ptr<typename EliminateableFactorGraph<FACTORGRAPH>::BayesNetType>
-    EliminateableFactorGraph<FACTORGRAPH>::marginalMultifrontalBayesNet(
-    boost::variant<const Ordering&, const KeyVector&> variables,
-    const Ordering& marginalizedVariableOrdering,
-    const Eliminate& function, OptionalVariableIndex variableIndex) const
-  {
+  template <class FACTORGRAPH>
+  boost::shared_ptr<
+      typename EliminateableFactorGraph<FACTORGRAPH>::BayesNetType>
+  EliminateableFactorGraph<FACTORGRAPH>::marginalMultifrontalBayesNet(
+      boost::variant<const Ordering &, const KeyVector &> variables,
+      const Ordering &marginalizedVariableOrdering, const Eliminate &function,
+      OptionalVariableIndex variableIndex,
+      boost::shared_ptr<BayesTreeType> *bayesTree) const {
     if(!variableIndex) {
       // If no variable index is provided, compute one and call this function again
       VariableIndex index(asDerived());
@@ -275,10 +277,15 @@ namespace gtsam {
       gttic(marginalMultifrontalBayesNet);
       // An ordering was provided for the marginalized variables, so we can first eliminate them
       // in the order requested.
-      boost::shared_ptr<BayesTreeType> bayesTree;
+      boost::shared_ptr<BayesTreeType> tmpBayesTree;
       boost::shared_ptr<FactorGraphType> factorGraph;
-      boost::tie(bayesTree,factorGraph) =
-        eliminatePartialMultifrontal(marginalizedVariableOrdering, function, *variableIndex);
+      if (bayesTree) {
+        boost::tie(*bayesTree, factorGraph) = eliminatePartialMultifrontal(
+            marginalizedVariableOrdering, function, *variableIndex);
+      } else {
+        boost::tie(tmpBayesTree, factorGraph) = eliminatePartialMultifrontal(
+            marginalizedVariableOrdering, function, *variableIndex);
+      }
 
       if(const Ordering* varsAsOrdering = boost::get<const Ordering&>(&variables))
       {
