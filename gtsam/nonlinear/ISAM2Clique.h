@@ -127,9 +127,6 @@ class GTSAM_EXPORT ISAM2Clique
   FactorGraphType
   marginal2(Eliminate function = EliminationTraitsType::DefaultEliminate) const override;
 
-  boost::shared_ptr<GaussianFactorGraph::BayesTreeType> unusedTree_ = nullptr;
-  FactorGraphType reducedGraph_;
-
 private:
   /**
    * Check if clique was replaced, or if any parents were changed above the

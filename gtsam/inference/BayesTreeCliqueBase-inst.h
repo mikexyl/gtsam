@@ -28,6 +28,9 @@ namespace gtsam {
     const typename FactorGraphType::EliminationResult& eliminationResult)
   {
     conditional_ = eliminationResult.first;
+
+    unusedTree_ = nullptr;
+    reducedGraph_ = FactorGraphType();
   }
 
   /* ************************************************************************* */

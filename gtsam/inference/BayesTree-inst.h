@@ -289,8 +289,9 @@ namespace gtsam {
 
     // Now, marginalize out everything that is not variable j
     try {
-      BayesNetType marginalBN =
-          *cliqueMarginal.marginalMultifrontalBayesNet(Ordering{j}, function);
+      BayesNetType marginalBN = *cliqueMarginal.marginalMultifrontalBayesNet(
+          Ordering{j}, function, boost::none, &clique->unusedTree_);
+      clique->reducedGraph_ = marginalBN;
 
       // The Bayes net should contain only one conditional for variable j, so
       // return it
