@@ -278,64 +278,28 @@ namespace gtsam {
     FactorGraphType cliqueMarginal = clique->marginal2(function, j);
 
     // Now, marginalize out everything that is not variable j
-    std::cout << "cliqueMarginal " << DefaultKeyFormatter(j) << ": "
-              << std::endl;
+    std::map<int, KeyVector> orderingMap;
+    FactorGraphType filteredConditionals;
     for (auto factor : cliqueMarginal) {
-      if (auto conditional =
-              boost::dynamic_pointer_cast<ConditionalType>(factor)) {
-        conditional->ConditionalType::BaseConditional::print();
-      } else {
-        factor->print();
-      }
+      auto conditional = boost::dynamic_pointer_cast<ConditionalType>(factor);
+      KeySet parents(conditional->beginParents(), conditional->endParents());
+      if (parents.find(j) != parents.end())
+        continue;
+      filteredConditionals.push_back(factor);
+      orderingMap.emplace(
+          conditional->nrFrontals() + conditional->nrParents(),
+          KeyVector(conditional->beginFrontals(), conditional->endFrontals()));
     }
 
-    try {
-      std::map<int, KeyVector> orderingMap;
-      FactorGraphType filteredConditionals;
-      for (auto factor : cliqueMarginal) {
-        auto conditional = boost::dynamic_pointer_cast<ConditionalType>(factor);
-        KeySet parents(conditional->beginParents(), conditional->endParents());
-        if (parents.find(j) != parents.end())
-          continue;
-        filteredConditionals.push_back(factor);
-        orderingMap.emplace(conditional->nrFrontals() +
-                                conditional->nrParents(),
-                            KeyVector(conditional->beginFrontals(),
-                                      conditional->endFrontals()));
-      }
-
-      KeyVector ordering;
-      for (auto &pair : orderingMap) {
-        ordering.insert(ordering.end(), pair.second.begin(), pair.second.end());
-      }
-
-      std::cout << "filteredMarginals " << DefaultKeyFormatter(j) << ": "
-                << std::endl;
-      for (auto factor : filteredConditionals) {
-        if (auto conditional =
-                boost::dynamic_pointer_cast<ConditionalType>(factor)) {
-          conditional->ConditionalType::BaseConditional::print();
-        } else {
-          factor->print();
-        }
-      }
-
-      BayesNetType marginalBN =
-          *filteredConditionals.eliminateSequential(Ordering(ordering), function);
-
-      return marginalBN.back();
-    } catch (std::exception &e) {
-      std::cout << "marginalFactor " << DefaultKeyFormatter(j) << " "
-                << e.what() << std::endl;
-
-      std::cout << "clique: " << clique << std::endl;
-
-      clique->unusedTree_->print("unusedTree: ");
-
-      clique->conditional()->ConditionalType::BaseConditional::print(
-          "clique conditional: ");
-      throw;
+    KeyVector ordering;
+    for (auto &pair : orderingMap) {
+      ordering.insert(ordering.end(), pair.second.begin(), pair.second.end());
     }
+
+    BayesNetType marginalBN =
+        *filteredConditionals.eliminateSequential(Ordering(ordering), function);
+
+    return marginalBN.back();
   }
 
   /* ************************************************************************* */
