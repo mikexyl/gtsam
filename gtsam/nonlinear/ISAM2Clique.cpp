@@ -16,6 +16,7 @@
  */
 
 #include "gtsam/linear/GaussianBayesTree.h"
+#include <fmt/format.h>
 #include <gtsam/inference/BayesTreeCliqueBase-inst.h>
 #include <gtsam/linear/VectorValues.h>
 #include <gtsam/linear/linearAlgorithms-inst.h>
@@ -46,7 +47,9 @@ void ISAM2Clique::setEliminationResult(
                                conditional_->d(),
       -conditional_->S().transpose() * conditional_->d();
 
-  unusedTree_ = nullptr;
+  unusedTree_ = boost::make_shared<BayesTreeType>();
+  auto clique = boost::make_shared<BayesTreeType::Clique>(conditional_);
+  unusedTree_->addClique(clique, nullptr);
   reducedGraph_ = FactorGraphType();
 }
 
@@ -369,45 +372,113 @@ ISAM2Clique::separatorMarginal(Eliminate function) const {
       KeyVector indicesS(this->conditional()->beginParents(),
                          this->conditional()->endParents());
 
-      if (parent->reducedGraph_.size()) {
-        FactorGraphType siblingsSeparatorMarginal(parent->reducedGraph_);
-        KeyVector indicesSp, indicesSf;
+      bool bidirectional_marginalization = false;
+#ifdef GTSAM_ISAM2_FAST_MARGINALIZATION
+      bidirectional_marginalization = true;
+#endif
+
+      if (bidirectional_marginalization and parent->reducedGraph_.size() > 0) {
+        FactorGraphType reducedMarginal(parent->reducedGraph_);
+        KeyVector toEliminate;
+        KeySet indicesSSet(indicesS.begin(), indicesS.end());
+        // std::cout << parent << std::endl;
+        // parent->unusedTree_->print(" unused tree: ");
+        parent->conditional()->ConditionalType::BaseConditional::print(
+            "p_parent(F|S): ");
+        bool hasRemainingConditional = parent->unusedTree_->nodes().size();
+        BayesTreeType::sharedClique node(nullptr);
+        ConditionalType::shared_ptr conditional =
+            parent->unusedTree_->roots().size()
+                ? parent->unusedTree_->roots().front()->conditional()
+                : ConditionalType::shared_ptr();
+        JacobianFactor::shared_ptr jacobian(nullptr);
+        std::stringstream ss;
+        if (hasRemainingConditional) {
+          node = parent->unusedTree_->nodes().begin()->second;
+          for (auto key : node->conditional()->frontals()) {
+            if (not indicesSSet.count(key)) {
+              toEliminate.push_back(key);
+              ss << DefaultKeyFormatter(key) << " ";
+            }
+          }
+
+          // std::cout << "to eliminate: " << ss.str() << std::endl;
+
+          reducedMarginal.push_back(node->conditional());
+
+          // eliminate indiceSf from the parent unused tree
+          std::tie(conditional, jacobian) =
+              node->conditional()->eliminate(Ordering{toEliminate});
+        }
+
+        // for (auto factor : reducedMarginal) {
+        //   if (auto conditional =
+        //           boost::dynamic_pointer_cast<ConditionalType>(factor)) {
+        //     conditional->ConditionalType::BaseConditional::print(
+        //         "input P(S): ");
+        //   } else {
+        //     factor->print();
+        //   }
+        // }
+
+        // boost::shared_ptr<BayesNetType> separatorMarginal_Sp;
+        // separatorMarginal_Sp =
+        //     siblingsSeparatorMarginal.marginalMultifrontalBayesNet(
+        //         Ordering(indicesSp), function);
+        KeyVector new_conditional_parent;
+        new_conditional_parent.insert(new_conditional_parent.end(),
+                                      indicesS.begin(), indicesS.end());
+        KeySet added(new_conditional_parent.begin(),
+                     new_conditional_parent.end());
+
+        if (parent->unusedTree_->roots().size()) {
+          for (auto key :
+               parent->unusedTree_->roots().front()->conditional()->parents()) {
+            if (not added.count(key)) {
+              new_conditional_parent.push_back(key);
+              added.insert(key);
+            }
+          }
+        }
+        // reverse new_conditional_parent
+        std::reverse(new_conditional_parent.begin(),
+                     new_conditional_parent.end());
+
+        std::cout << "indicesS: ";
         for (auto key : indicesS) {
-          if (siblingsSeparatorMarginal.keys().exists(key)) {
-            indicesSp.push_back(key);
-          } else {
-            indicesSf.push_back(key);
-          }
+          std::cout << DefaultKeyFormatter(key) << " ";
         }
+        std::cout << std::endl;
 
-        auto separatorMarginal_Sp =
-            siblingsSeparatorMarginal.marginalMultifrontalBayesNet(
-                Ordering(indicesSp), function);
+        // std::cout << "keys to marginalize: ";
+        // for (auto key : new_conditional_parent) {
+        //   std::cout << DefaultKeyFormatter(key) << " ";
+        // }
+        // std::cout << std::endl;
 
-        if (parent->unusedTree_) {
-          for (auto clique : parent->unusedTree_->nodes()) {
-            siblingsSeparatorMarginal.push_back(clique.second->conditional());
-            break;
-          }
-        }
+        // this->conditional()->ConditionalType::BaseConditional::print(
+        //     "p(F|S): ");
 
         gttic(BayesTreeCliqueBase_separatorMarginal_incremental);
-        boost::shared_ptr<BayesNetType> separatorMarginalInSiblings;
+        boost::shared_ptr<BayesNetType> marginals;
+        boost::shared_ptr<BayesTreeType> tree;
         try {
-          separatorMarginalInSiblings =
-              siblingsSeparatorMarginal.marginalMultifrontalBayesNet(
-                  Ordering(indicesSf), function, boost::none,
-                  &parent->unusedTree_);
+          marginals = reducedMarginal.marginalMultifrontalBayesNet(
+              Ordering(new_conditional_parent), function, boost::none, &tree);
+          tree->print("tree: ");
+
+          if (conditional) {
+            parent->unusedTree_ = boost::make_shared<BayesTreeType>();
+            parent->unusedTree_->clear();
+            BayesTreeType::Clique::shared_ptr new_clique(
+                boost::make_shared<BayesTreeType::Clique>(conditional));
+            parent->unusedTree_->addClique(new_clique, nullptr);
+          }
         } catch (std::exception &e) {
           std::cout << "Error in marginalMultifrontalBayesNet: " << e.what()
                     << std::endl;
-          std::cout << "keys to marginalize: ";
-          for (auto key : indicesS) {
-            std::cout << DefaultKeyFormatter(key) << " ";
-          }
-          std::cout << std::endl;
 
-          for (auto factor : siblingsSeparatorMarginal) {
+          for (auto factor : reducedMarginal) {
             if (auto conditional =
                     boost::dynamic_pointer_cast<ConditionalType>(factor)) {
               conditional->ConditionalType::BaseConditional::print();
@@ -415,15 +486,27 @@ ISAM2Clique::separatorMarginal(Eliminate function) const {
               factor->print();
             }
           }
+
           throw;
         }
         gttoc(BayesTreeCliqueBase_separatorMarginal_incremental);
 
-        separatorMarginalInSiblings->push_back(*separatorMarginal_Sp);
-        cachedSeparatorMarginal_.reset(*separatorMarginalInSiblings);
-        parent->reducedGraph_ = *separatorMarginalInSiblings;
+        parent->reducedGraph_ = *marginals;
+        // separatorMarginalInSiblings->push_back(*separatorMarginal_Sp);
 
-        // for (auto factor : *separatorMarginalInSiblings) {
+        // abstract separator marginal from marginals
+        BayesNetType::shared_ptr separatorMarginal(new BayesNetType());
+        for (int i = 0; i < indicesS.size(); i++) {
+          separatorMarginal->push_back(
+              marginals->at(marginals->size() - 1 - i));
+        }
+        cachedSeparatorMarginal_.reset(*separatorMarginal);
+
+        // std::cout << parent << std::endl;
+        // parent->conditional()->ConditionalType::BaseConditional::print(
+        //     "p_parent(F|S): ");
+
+        // for (auto factor : *marginals) {
         //   if (auto conditional =
         //           boost::dynamic_pointer_cast<ConditionalType>(factor)) {
         //     conditional->ConditionalType::BaseConditional::print("p_sib(S):
@@ -432,19 +515,21 @@ ISAM2Clique::separatorMarginal(Eliminate function) const {
         //     factor->print();
         //   }
         // }
+
+        // parent->unusedTree_->print("unused tree: ");
       } else {
         // Flatten recursion in timing outline
         gttoc(BayesTreeCliqueBase_separatorMarginal_cachemiss);
         gttoc(BayesTreeCliqueBase_separatorMarginal);
 
+        // std::cout << "BayesTreeCliqueBase_separatorMarginal_cachemiss"
+        //           << std::endl;
+
         // Obtain P(S) = \int P(Cp) = \int P(Fp|Sp) P(Sp)
         // initialize P(Cp) with the parent separator marginal
         FactorGraphType p_Cp(parent->separatorMarginal(function)); // P(Sp)
 
-        gttic(BayesTreeCliqueBase_separatorMarginal);
-        gttic(BayesTreeCliqueBase_separatorMarginal_cachemiss);
-
-        // std::cout << "p(S_parent): " << std::endl;
+        // std::cout << "P(Sp): " << std::endl;
         // for (auto factor : p_Cp) {
         //   if (auto conditional =
         //           boost::dynamic_pointer_cast<ConditionalType>(factor)) {
@@ -454,22 +539,87 @@ ISAM2Clique::separatorMarginal(Eliminate function) const {
         //   }
         // }
 
+        gttic(BayesTreeCliqueBase_separatorMarginal);
+        gttic(BayesTreeCliqueBase_separatorMarginal_cachemiss);
+
+        // TODO: parent separator marginal now contains more than the separators
+
         // now add the parent conditional
         p_Cp += parent->conditional_; // P(Fp|Sp)
-        // parent->conditional_->ConditionalType::BaseConditional::print(
-        //     "p(F_parent|S_parent): ");
+        // parent->conditional()->ConditionalType::BaseConditional::print(
+        //     "P(Fp|Sp): ");
 
-        // this->conditional()->ConditionalType::BaseConditional::print(
-        //     "p(F|S): ");
-
-        // std::cout << "keys in p_Cp" << std::endl;
-        // for (auto key : p_Cp.keys()) {
+        // std::cout << "indicesS: ";
+        // for (auto key : indicesS) {
         //   std::cout << DefaultKeyFormatter(key) << " ";
         // }
         // std::cout << std::endl;
 
-        auto separatorMarginal = p_Cp.marginalMultifrontalBayesNet(
-            Ordering(indicesS), function, boost::none, &parent->unusedTree_);
+        boost::shared_ptr<BayesNetType> separatorMarginal;
+        try {
+          separatorMarginal = p_Cp.marginalMultifrontalBayesNet(
+              Ordering(indicesS), function, boost::none, &parent->unusedTree_);
+        } catch (...) {
+          std::cout << "Error in init separator marginal" << std::endl;
+          std::cout << "p_Cp: " << std::endl;
+          for (auto factor : p_Cp) {
+            if (auto conditional =
+                    boost::dynamic_pointer_cast<ConditionalType>(factor)) {
+              conditional->ConditionalType::BaseConditional::print();
+            } else {
+              factor->print();
+            }
+          }
+          throw;
+        }
+
+        // auto parent_frontals = parent->conditional_->frontals();
+        // // eliminate all variables in the parent conditional that are are not
+        // // marginalized in the separator marginal
+        // KeyVector toEliminate;
+        // KeySet indicesSet(indicesS.begin(), indicesS.end());
+        // for (auto key : parent->conditional_->keys()) {
+        //   if (not indicesSet.count(key)) {
+        //     toEliminate.push_back(key);
+        //   }
+        // }
+
+        // boost::shared_ptr<GaussianConditional> conditional;
+        // boost::shared_ptr<JacobianFactor> jacobian;
+        // try {
+        //   std::tie(conditional, jacobian) =
+        //       parent->unusedTree_->nodes()
+        //           .begin()
+        //           ->second->conditional()
+        //           ->eliminate(Ordering{toEliminate});
+        // } catch (...) {
+        //   std::cout << "Error in eliminate" << std::endl;
+        //   std::cout << "to eliminate: ";
+        //   for (auto key : toEliminate) {
+        //     std::cout << DefaultKeyFormatter(key) << " ";
+        //   }
+        //   std::cout << std::endl;
+
+        //   parent->unusedTree_->print("unused tree: ");
+        //   throw;
+        // }
+
+        // parent->unusedTree_->clear();
+        // BayesTreeType::Clique::shared_ptr new_clique(
+        //     boost::make_shared<BayesTreeType::Clique>(conditional));
+        // parent->unusedTree_->addClique(new_clique, nullptr);
+
+        // for (auto factor : *separatorMarginal) {
+        //   if (auto conditional =
+        //           boost::dynamic_pointer_cast<ConditionalType>(factor)) {
+        //     conditional->ConditionalType::BaseConditional::print("P(S): ");
+        //   } else {
+        //     factor->print();
+        //   }
+        // }
+
+        // std::cout << parent << std::endl;
+        // parent->unusedTree_->print("init unused tree: ");
         cachedSeparatorMarginal_.reset(*separatorMarginal);
         parent->reducedGraph_ = *separatorMarginal;
       }
@@ -480,19 +630,24 @@ ISAM2Clique::separatorMarginal(Eliminate function) const {
   return *cachedSeparatorMarginal_; // return the cached version
 }
 
-ISAM2Clique::FactorGraphType ISAM2Clique::marginal2(Eliminate function) const {
+ISAM2Clique::FactorGraphType
+ISAM2Clique::marginal2(Eliminate function, boost::optional<Key> key) const {
   if(this->reducedGraph_.size()) {
-    FactorGraphType p_C(this->reducedGraph_);
-    if(this->unusedTree_) {
-      for (auto clique : this->unusedTree_->nodes()) {
-        p_C.push_back(clique.second->conditional());
-        break;
+    gttic(BayesTreeCliqueBase_marginal2_incremental);
+    FactorGraphType p_C;
+    if (this->unusedTree_ and key.has_value()) {
+      auto clique = this->unusedTree_->nodes().find(*key);
+      if (clique != this->unusedTree_->nodes().end()) {
+        p_C += clique->second->conditional_;
       }
+    }
+    for (auto factor : this->reducedGraph_) {
+      p_C += factor;
     }
     return p_C;
   }
 
-  gttic(BayesTreeCliqueBase_marginal2);
+  gttic(BayesTreeCliqueBase_marginal2_cachemiss);
   // initialize with separator marginal P(S)
   FactorGraphType p_C = this->separatorMarginal(function);
   // add the conditional P(F|S)

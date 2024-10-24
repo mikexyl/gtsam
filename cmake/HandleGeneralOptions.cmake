@@ -29,6 +29,7 @@ option(GTSAM_ALLOW_DEPRECATED_SINCE_V42     "Allow use of methods/functions depr
 option(GTSAM_SUPPORT_NESTED_DISSECTION      "Support Metis-based nested dissection" ON)
 option(GTSAM_TANGENT_PREINTEGRATION         "Use new ImuFactor with integration on tangent space" ON)
 option(GTSAM_SLOW_BUT_CORRECT_BETWEENFACTOR "Use the slower but correct version of BetweenFactor" OFF)
+option(GTSAM_ISAM2_FAST_MARGINALIZATION     "Use the fast bidirectional marginalization in ISAM2" OFF)
 if(NOT MSVC AND NOT XCODE_VERSION)
     option(GTSAM_BUILD_WITH_CCACHE           "Use ccache compiler cache" ON)
 endif()

@@ -79,7 +79,7 @@ namespace gtsam {
   void BayesTreeCliqueBase<DERIVED, FACTORGRAPH>::print(
     const std::string& s, const KeyFormatter& keyFormatter) const
   {
-    conditional_->print(s, keyFormatter);
+    conditional_->ConditionalType::BaseConditional::print(s, keyFormatter);
   }
 
   /* ************************************************************************* */
@@ -196,7 +196,7 @@ namespace gtsam {
   template <class DERIVED, class FACTORGRAPH>
   typename BayesTreeCliqueBase<DERIVED, FACTORGRAPH>::FactorGraphType
   BayesTreeCliqueBase<DERIVED, FACTORGRAPH>::marginal2(
-      Eliminate function) const {
+      Eliminate function, boost::optional<Key> key) const {
     gttic(BayesTreeCliqueBase_marginal2);
     // initialize with separator marginal P(S)
     FactorGraphType p_C = this->separatorMarginal(function);

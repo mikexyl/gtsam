@@ -20,10 +20,11 @@
 
 #pragma once
 
-#include <gtsam/inference/Ordering.h>
-#include <gtsam/inference/BayesTree.h>
-#include <gtsam/base/treeTraversal-inst.h>
 #include <gtsam/base/timing.h>
+#include <gtsam/base/treeTraversal-inst.h>
+#include <gtsam/inference/BayesTree.h>
+#include <gtsam/inference/Ordering.h>
+#include <gtsam/nonlinear/Marginals.h>
 
 #include <boost/optional.hpp>
 #include <fstream>
@@ -265,19 +266,20 @@ namespace gtsam {
   /* ************************************************************************* */
   // First finds clique marginal then marginalizes that
   /* ************************************************************************* */
-  template<class CLIQUE>
+  template <class CLIQUE>
   typename BayesTree<CLIQUE>::sharedConditional
-    BayesTree<CLIQUE>::marginalFactor(Key j, const Eliminate& function) const
-  {
-    std::cout << "marginalFactor " << DefaultKeyFormatter(j) << std::endl;
+  BayesTree<CLIQUE>::marginalFactor(Key j, const Eliminate &function) const {
     gttic(BayesTree_marginalFactor);
 
     // get clique containing Key j
     sharedClique clique = this->clique(j);
 
     // calculate or retrieve its marginal P(C) = P(F,S)
-    FactorGraphType cliqueMarginal = clique->marginal2(function);
+    FactorGraphType cliqueMarginal = clique->marginal2(function, j);
 
+    // Now, marginalize out everything that is not variable j
+    std::cout << "cliqueMarginal " << DefaultKeyFormatter(j) << ": "
+              << std::endl;
     for (auto factor : cliqueMarginal) {
       if (auto conditional =
               boost::dynamic_pointer_cast<ConditionalType>(factor)) {
@@ -287,21 +289,51 @@ namespace gtsam {
       }
     }
 
-    // Now, marginalize out everything that is not variable j
     try {
-      BayesNetType marginalBN = *cliqueMarginal.marginalMultifrontalBayesNet(
-          Ordering{j}, function, boost::none, &clique->unusedTree_);
-      clique->reducedGraph_ = marginalBN;
+      std::map<int, KeyVector> orderingMap;
+      FactorGraphType filteredConditionals;
+      for (auto factor : cliqueMarginal) {
+        auto conditional = boost::dynamic_pointer_cast<ConditionalType>(factor);
+        KeySet parents(conditional->beginParents(), conditional->endParents());
+        if (parents.find(j) != parents.end())
+          continue;
+        filteredConditionals.push_back(factor);
+        orderingMap.emplace(conditional->nrFrontals() +
+                                conditional->nrParents(),
+                            KeyVector(conditional->beginFrontals(),
+                                      conditional->endFrontals()));
+      }
 
-      // The Bayes net should contain only one conditional for variable j, so
-      // return it
-      return marginalBN.front();
+      KeyVector ordering;
+      for (auto &pair : orderingMap) {
+        ordering.insert(ordering.end(), pair.second.begin(), pair.second.end());
+      }
+
+      std::cout << "filteredMarginals " << DefaultKeyFormatter(j) << ": "
+                << std::endl;
+      for (auto factor : filteredConditionals) {
+        if (auto conditional =
+                boost::dynamic_pointer_cast<ConditionalType>(factor)) {
+          conditional->ConditionalType::BaseConditional::print();
+        } else {
+          factor->print();
+        }
+      }
+
+      BayesNetType marginalBN =
+          *filteredConditionals.eliminateSequential(Ordering(ordering), function);
+
+      return marginalBN.back();
     } catch (std::exception &e) {
       std::cout << "marginalFactor " << DefaultKeyFormatter(j) << " "
                 << e.what() << std::endl;
 
-      cliqueMarginal.print("cliqueMarginal");
+      std::cout << "clique: " << clique << std::endl;
 
+      clique->unusedTree_->print("unusedTree: ");
+
+      clique->conditional()->ConditionalType::BaseConditional::print(
+          "clique conditional: ");
       throw;
     }
   }

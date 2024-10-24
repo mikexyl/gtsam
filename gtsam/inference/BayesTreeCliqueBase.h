@@ -58,6 +58,7 @@ namespace gtsam {
     typedef boost::shared_ptr<DerivedType> derived_ptr;
     typedef boost::weak_ptr<DerivedType> derived_weak_ptr;
     typedef EliminationTraits<FACTORGRAPH> EliminationTraitsType;
+    typedef typename EliminationTraitsType::BayesTreeType BayesTreeType;
 
   public:
     typedef FACTORGRAPH FactorGraphType;
@@ -120,8 +121,7 @@ namespace gtsam {
     derived_weak_ptr parent_;
     FastVector<derived_ptr> children;
     int problemSize_;
-    boost::shared_ptr<typename EliminationTraitsType::BayesTreeType>
-        unusedTree_ = nullptr;
+    boost::shared_ptr<BayesTreeType> unusedTree_ = nullptr;
     FactorGraphType reducedGraph_;
 
     bool is_root = false;
@@ -178,7 +178,9 @@ namespace gtsam {
     BayesNetType shortcut(const derived_ptr& root, Eliminate function = EliminationTraitsType::DefaultEliminate) const;
 
     /** return the marginal P(C) of the clique, using marginal caching */
-    virtual FactorGraphType marginal2(Eliminate function = EliminationTraitsType::DefaultEliminate) const;
+    virtual FactorGraphType
+    marginal2(Eliminate function = EliminationTraitsType::DefaultEliminate,
+              boost::optional<Key> key = boost::none) const;
 
     /**
      * This deletes the cached shortcuts of all cliques (subtree) below this clique.

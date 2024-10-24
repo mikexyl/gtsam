@@ -125,7 +125,8 @@ class GTSAM_EXPORT ISAM2Clique
   FactorGraphType separatorMarginal(Eliminate function) const override;
 
   FactorGraphType
-  marginal2(Eliminate function = EliminationTraitsType::DefaultEliminate) const override;
+  marginal2(Eliminate function = EliminationTraitsType::DefaultEliminate,
+            boost::optional<Key> key = boost::none) const override;
 
 private:
   /**

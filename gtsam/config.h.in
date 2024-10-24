@@ -83,3 +83,6 @@
 
 // Toggle switch for BetweenFactor jacobian computation
 #cmakedefine GTSAM_SLOW_BUT_CORRECT_BETWEENFACTOR
+
+// Toggle switch for fast marginalization in ISAM2
+#cmakedefine GTSAM_ISAM2_FAST_MARGINALIZATION
