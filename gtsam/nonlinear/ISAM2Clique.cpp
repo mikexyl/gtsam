@@ -468,10 +468,14 @@ ISAM2Clique::marginal2(Eliminate function, boost::optional<Key> key) const {
   if(this->reducedGraph_.size()) {
     gttic(BayesTreeCliqueBase_marginal2_incremental);
     FactorGraphType p_C;
-    if (this->unusedTree_ and key.has_value()) {
-      auto clique = this->unusedTree_->nodes().find(*key);
-      if (clique != this->unusedTree_->nodes().end()) {
-        p_C += clique->second->conditional_;
+    if (this->unusedTree_) {
+      if (key.has_value()) {
+        auto clique = this->unusedTree_->nodes().find(*key);
+        if (clique != this->unusedTree_->nodes().end()) {
+          p_C += clique->second->conditional_;
+        }
+      } else {
+        this->unusedTree_->addFactorsToGraph(&p_C);
       }
     }
     for (auto factor : this->reducedGraph_) {

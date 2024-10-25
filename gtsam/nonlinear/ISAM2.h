@@ -239,6 +239,8 @@ class GTSAM_EXPORT ISAM2 : public BayesTree<ISAM2Clique> {
   /** Return marginal on any variable as a covariance matrix */
   Matrix marginalCovariance(Key key) const;
 
+  std::map<Key, Matrix> marginalCovariance(KeySet keys) const;
+
   /// @name Public members for non-typical usage
   /// @{
 

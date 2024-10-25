@@ -25,6 +25,7 @@
 #include <gtsam/inference/BayesTree.h>
 #include <gtsam/inference/Ordering.h>
 #include <gtsam/nonlinear/Marginals.h>
+#include <tbb/parallel_for_each.h>
 
 #include <boost/optional.hpp>
 #include <fstream>
@@ -300,6 +301,62 @@ namespace gtsam {
         *filteredConditionals.eliminateSequential(Ordering(ordering), function);
 
     return marginalBN.back();
+  }
+
+  template <class CLIQUE>
+  ConcurrentMap<Key, typename BayesTree<CLIQUE>::sharedConditional>
+  BayesTree<CLIQUE>::marginalFactor(KeySet j, const Eliminate &function) const {
+    gttic(BayesTree_marginalFactor_batch);
+
+    Marginals s;
+
+    std::map<sharedClique, KeySet> cliqueMap;
+    for (Key key : j) {
+      sharedClique clique = this->clique(key);
+      cliqueMap[clique].insert(key);
+    }
+
+    ConcurrentMap<Key, sharedConditional> result;
+    for (auto [clique, keys] : cliqueMap) {
+      FactorGraphType cliqueMarginal = clique->marginal2(function);
+
+      tbb::parallel_for_each(
+          keys.begin(), keys.end(),
+          [cliqueMarginal, function, &result](Key key) {
+            // Now, marginalize out everything that is not variable j
+            std::map<int, KeyVector> orderingMap;
+            FactorGraphType filteredConditionals;
+            for (auto it = cliqueMarginal.begin(); it != cliqueMarginal.end();
+                 ++it) {
+              auto factor = *it;
+              auto conditional =
+                  boost::dynamic_pointer_cast<ConditionalType>(factor);
+              KeySet parents(conditional->beginParents(),
+                             conditional->endParents());
+              if (parents.find(key) != parents.end())
+                continue;
+              filteredConditionals.push_back(factor);
+              orderingMap.emplace(conditional->nrFrontals() +
+                                      conditional->nrParents(),
+                                  KeyVector(conditional->beginFrontals(),
+                                            conditional->endFrontals()));
+            }
+
+            KeyVector ordering;
+            for (auto &pair : orderingMap) {
+              ordering.insert(ordering.end(), pair.second.begin(),
+                              pair.second.end());
+            }
+
+            auto marginalBN = filteredConditionals.eliminateSequential(
+                Ordering(ordering), function);
+            result[key] = marginalBN->back();
+          });
+    }
+
+    return result;
+
+    gttoc(BayesTree_marginalFactor_batch);
   }
 
   /* ************************************************************************* */

@@ -170,6 +170,10 @@ namespace gtsam {
      *  GaussianFactor. */
     sharedConditional marginalFactor(Key j, const Eliminate& function = EliminationTraitsType::DefaultEliminate) const;
 
+    ConcurrentMap<Key, sharedConditional>
+    marginalFactor(KeySet j, const Eliminate &function =
+                                 EliminationTraitsType::DefaultEliminate) const;
+
     /**
      * return joint on two variables
      * Limitation: can only calculate joint if cliques are disjoint or one of them is root

@@ -803,6 +803,17 @@ Matrix ISAM2::marginalCovariance(Key key) const {
       .inverse();
 }
 
+std::map<Key, Matrix> ISAM2::marginalCovariance(KeySet keys) const {
+  auto marginalFactors = marginalFactor(keys, params_.getEliminationFunction());
+  std::map<Key, Matrix> marginals;
+  std::for_each(marginalFactors.begin(), marginalFactors.end(),
+                [&](std::pair<Key, sharedConditional> factor) {
+                  marginals[factor.first] =
+                      factor.second->information().inverse();
+                });
+  return marginals;
+}
+
 /* ************************************************************************* */
 const VectorValues& ISAM2::getDelta() const {
   if (!deltaReplacedMask_.empty()) updateDelta();
