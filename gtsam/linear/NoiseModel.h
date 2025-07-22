@@ -555,6 +555,9 @@ namespace gtsam {
       Vector whiten(const Vector& v) const override;
       Vector unwhiten(const Vector& v) const override;
       Matrix Whiten(const Matrix& H) const override;
+      virtual Matrix Whiten(const Matrix& H, size_t i) const {
+        throw std::invalid_argument("Isotropic::Whiten(Matrix, size_t) not implemented");
+      }
       void WhitenInPlace(Matrix& H) const override;
       void whitenInPlace(Vector& v) const override;
       void WhitenInPlace(Eigen::Block<Matrix> H) const override;

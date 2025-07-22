@@ -118,6 +118,8 @@ protected:
   ~SmartFactorBase() override {
   }
 
+  SharedIsotropic noiseModel() const { return noiseModel_; }
+
   /**
    * Add a new measurement and pose/camera key.
    * @param measured is the 2m dimensional projection of a single landmark
@@ -348,7 +350,7 @@ protected:
     noiseModel_->WhitenSystem(E, b);
     // TODO make WhitenInPlace work with any dense matrix type
     for (size_t i = 0; i < F.size(); i++)
-      F[i] = noiseModel_->Whiten(F[i]);
+      F[i] = noiseModel_->Whiten(F[i], i);
   }
 
   /// Return Jacobians as RegularImplicitSchurFactor with raw access
