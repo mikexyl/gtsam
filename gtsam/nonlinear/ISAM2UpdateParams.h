@@ -20,7 +20,11 @@
 #include <gtsam/dllexport.h>              // GTSAM_EXPORT
 #include <gtsam/inference/Key.h>          // Key, KeySet
 #include <gtsam/nonlinear/ISAM2Result.h>  //FactorIndices
+#include <gtsam/nonlinear/NonlinearFactorGraph.h>
 #include <boost/optional.hpp>
+
+#include <string>
+#include <vector>
 
 namespace gtsam {
 
@@ -69,6 +73,25 @@ struct ISAM2UpdateParams {
    * the deltas become too small down in the tree. This flagg forces a full
    * solve instead. */
   bool forceFullSolve{false};
+
+  /** Non-persistent nonlinear factors used only to compute the current linear
+   * delta after the regular Bayes tree has been updated. They are linearized at
+   * the current iSAM2 linearization point, added to a temporary copy of the
+   * current Gaussian clique system, solved, and discarded. They are never added
+   * to nonlinearFactors_ or linearFactors_, so fixed-lag marginalization cannot
+   * absorb them into future marginal priors. */
+  NonlinearFactorGraph temporaryFactorsForDelta;
+
+  /** Optional CSV-safe labels, one per temporaryFactorsForDelta entry, used
+   * only for diagnostics at the exact iSAM2 linearization point. */
+  std::vector<std::string> temporaryFactorDiagnosticsForDelta;
+
+  /** When temporaryFactorsForDelta are present, retract the resulting temporary
+   * delta into theta_ and immediately rebuild the clean Bayes tree from the
+   * persistent graph only. This implements the sequence:
+   * linearize clean graph, solve with temporary linear factors, commit state,
+   * discard temporary factors, relinearize clean graph. */
+  bool commitTemporaryDeltaAndRelinearize{false};
 };
 
 }  // namespace gtsam

@@ -315,6 +315,13 @@ class GTSAM_EXPORT ISAM2 : public BayesTree<ISAM2Clique> {
   void removeVariables(const KeySet& unusedKeys);
 
   void updateDelta(bool forceFullSolve = false) const;
+  Ordering bayesTreeEliminationOrdering() const;
+  void updateDeltaWithTemporaryFactors(
+      const NonlinearFactorGraph& temporaryFactors,
+      const std::vector<std::string>& temporaryFactorDiagnostics,
+      bool forceFullSolve) const;
+  void commitDeltaAndRelinearizeClean(
+      const ISAM2UpdateParams& updateParams);
 
  private:
   /** Serialization function */

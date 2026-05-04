@@ -24,14 +24,100 @@
 #include <gtsam/base/timing.h>
 #include <gtsam/inference/BayesTree-inst.h>
 #include <gtsam/nonlinear/LinearContainerFactor.h>
+#include <gtsam/nonlinear/PriorFactor.h>
+#include <gtsam/geometry/Pose3.h>
 
 #include <algorithm>
+#include <cmath>
+#include <functional>
+#include <iomanip>
+#include <iostream>
+#include <limits>
 #include <map>
+#include <sstream>
+#include <stdexcept>
 #include <utility>
 
 using namespace std;
 
 namespace gtsam {
+
+namespace {
+
+std::string diagnosticLabelToken(const std::string& diagnosticLabel,
+                                 size_t tokenIndex,
+                                 const std::string& fallback) {
+  size_t begin = 0;
+  size_t currentIndex = 0;
+  while (begin <= diagnosticLabel.size()) {
+    const size_t end = diagnosticLabel.find(',', begin);
+    if (currentIndex == tokenIndex) {
+      return diagnosticLabel.substr(
+          begin, end == std::string::npos ? std::string::npos : end - begin);
+    }
+    if (end == std::string::npos) {
+      break;
+    }
+    begin = end + 1;
+    ++currentIndex;
+  }
+  return fallback;
+}
+
+void logTemporaryPose3PriorLinearizationResidual(
+    const NonlinearFactor::shared_ptr& factor, const Values& theta,
+    const std::string& diagnosticLabel) {
+  const auto priorFactor =
+      boost::dynamic_pointer_cast<PriorFactor<Pose3>>(factor);
+  if (!priorFactor || priorFactor->keys().size() != 1) {
+    return;
+  }
+
+  const Key key = priorFactor->keys().front();
+  if (!theta.exists(key)) {
+    return;
+  }
+
+  try {
+    constexpr double kRadToDeg = 180.0 / 3.14159265358979323846;
+    const Pose3& receiverPose = theta.at<Pose3>(key);
+    const Pose3& priorPose = priorFactor->prior();
+    const Pose3 receiverToPrior = receiverPose.between(priorPose);
+    const Vector residual = traits<Pose3>::Logmap(receiverToPrior);
+    const Point3 receiverT = receiverPose.translation();
+    const Point3 priorT = priorPose.translation();
+    const double yawError =
+        std::remainder(priorPose.rotation().yaw() -
+                           receiverPose.rotation().yaw(),
+                       2.0 * 3.14159265358979323846);
+    double covarianceTrace = std::numeric_limits<double>::quiet_NaN();
+    const auto gaussianNoise =
+        boost::dynamic_pointer_cast<noiseModel::Gaussian>(
+            priorFactor->noiseModel());
+    if (gaussianNoise) {
+      covarianceTrace = gaussianNoise->covariance().trace();
+    }
+
+    std::ostringstream row;
+    const std::string keyToken =
+        diagnosticLabelToken(diagnosticLabel, 3, "unknown");
+    row << std::setprecision(17)
+        << "CBS_TEMPORARY_LINEARIZATION_RESIDUAL_ROW," << diagnosticLabel
+        << ",isam2_theta," << keyToken << ","
+        << residual.norm() << "," << residual.head(3).norm() << ","
+        << residual.tail(3).norm() << "," << priorT.x() - receiverT.x()
+        << "," << priorT.y() - receiverT.y() << ","
+        << priorT.z() - receiverT.z() << "," << yawError << ","
+        << yawError * kRadToDeg << "," << covarianceTrace << ","
+        << receiverT.x() << "," << receiverT.y() << "," << receiverT.z()
+        << "," << priorT.x() << "," << priorT.y() << "," << priorT.z();
+    std::cout << row.str() << std::endl;
+  } catch (const std::exception&) {
+    return;
+  }
+}
+
+}  // namespace
 
 // Instantiate base class
 template class BayesTree<ISAM2Clique>;
@@ -470,6 +556,16 @@ ISAM2Result ISAM2::update(const NonlinearFactorGraph& newFactors,
   if (!result.unusedKeys.empty()) removeVariables(result.unusedKeys);
   result.cliques = this->nodes().size();
 
+  if (!updateParams.temporaryFactorsForDelta.empty()) {
+    updateDeltaWithTemporaryFactors(updateParams.temporaryFactorsForDelta,
+                                    updateParams.temporaryFactorDiagnosticsForDelta,
+                                    updateParams.forceFullSolve);
+    if (updateParams.commitTemporaryDeltaAndRelinearize) {
+      commitDeltaAndRelinearizeClean(updateParams);
+      result.cliques = this->nodes().size();
+    }
+  }
+
   if (params_.evaluateNonlinearError)
     update.error(nonlinearFactors_, calculateEstimate(), &result.errorAfter);
   return result;
@@ -757,6 +853,124 @@ void ISAM2::updateDelta(bool forceFullSolve) const {
   } else {
     throw std::runtime_error("iSAM2: unknown ISAM2Params type");
   }
+}
+
+/* ************************************************************************* */
+Ordering ISAM2::bayesTreeEliminationOrdering() const {
+  Ordering ordering;
+  std::function<void(const sharedClique&)> appendPostOrder =
+      [&](const sharedClique& clique) {
+        for (const sharedClique& child : clique->children) {
+          appendPostOrder(child);
+        }
+        const auto conditional = clique->conditional();
+        ordering.insert(ordering.end(),
+                        conditional->beginFrontals(),
+                        conditional->endFrontals());
+      };
+
+  for (const sharedClique& root : roots_) {
+    appendPostOrder(root);
+  }
+  return ordering;
+}
+
+/* ************************************************************************* */
+void ISAM2::updateDeltaWithTemporaryFactors(
+    const NonlinearFactorGraph& temporaryFactors,
+    const std::vector<std::string>& temporaryFactorDiagnostics,
+    bool forceFullSolve) const {
+  gttic(updateDeltaWithTemporaryFactors);
+  if (temporaryFactors.empty()) {
+    updateDelta(forceFullSolve);
+    return;
+  }
+  if (params_.optimizationParams.type() != typeid(ISAM2GaussNewtonParams)) {
+    throw std::runtime_error(
+        "ISAM2 temporary delta factors currently support only Gauss-Newton "
+        "optimization");
+  }
+
+  GaussianFactorGraph augmentedFactors;
+  addFactorsToGraph(&augmentedFactors);
+
+  size_t temporaryFactorIndex = 0;
+  for (const NonlinearFactor::shared_ptr& factor : temporaryFactors) {
+    const std::string diagnosticLabel =
+        temporaryFactorIndex < temporaryFactorDiagnostics.size()
+            ? temporaryFactorDiagnostics[temporaryFactorIndex]
+            : "unknown,unknown,unknown,unknown,temporary_linear_applied";
+    logTemporaryPose3PriorLinearizationResidual(factor, theta_,
+                                                diagnosticLabel);
+    ++temporaryFactorIndex;
+  }
+
+  const GaussianFactorGraph::shared_ptr linearizedTemporaryFactors =
+      temporaryFactors.linearize(theta_);
+  size_t linearizedTemporaryFactorCount = 0;
+  for (const GaussianFactor::shared_ptr& factor : *linearizedTemporaryFactors) {
+    if (factor) {
+      augmentedFactors.push_back(factor);
+      ++linearizedTemporaryFactorCount;
+    }
+  }
+
+  if (linearizedTemporaryFactorCount == 0) {
+    updateDelta(forceFullSolve);
+    return;
+  }
+
+  Ordering ordering = bayesTreeEliminationOrdering();
+  KeySet orderedKeys;
+  for (Key key : ordering) {
+    orderedKeys.insert(key);
+  }
+  for (Key key : augmentedFactors.keys()) {
+    if (!orderedKeys.exists(key)) {
+      ordering.push_back(key);
+      orderedKeys.insert(key);
+    }
+  }
+
+  // Solve a temporary linear system made from the clean Bayes-tree clique
+  // conditionals plus the one-update factors. This gives the same delta as
+  // adding those linear factors to a temporary copy of the clique system, while
+  // leaving nonlinearFactors_, linearFactors_, and the persistent Bayes tree
+  // unchanged for fixed-lag marginalization.
+  delta_ = augmentedFactors.optimize(ordering, params_.getEliminationFunction());
+  deltaReplacedMask_.clear();
+}
+
+/* ************************************************************************* */
+void ISAM2::commitDeltaAndRelinearizeClean(
+    const ISAM2UpdateParams& updateParams) {
+  gttic(commitDeltaAndRelinearizeClean);
+
+  KeySet relinKeys;
+  for (Key key : theta_.keys()) {
+    relinKeys.insert(key);
+  }
+  if (relinKeys.empty()) {
+    return;
+  }
+
+  // Commit the temporary fused linear solve into the nonlinear state estimate.
+  UpdateImpl::ExpmapMasked(delta_, relinKeys, &theta_);
+
+  // Rebuild the Bayes tree from the persistent graph only, at the fused state.
+  // The temporary factors have already been discarded; this keeps fixed-lag
+  // marginalization and future marginal covariances on the clean graph.
+  ISAM2Result cleanResult(params_.enableDetailedResults);
+  cleanResult.markedKeys.insert(relinKeys.begin(), relinKeys.end());
+  recalculate(updateParams, relinKeys, &cleanResult);
+
+  // The post-CBS state is now the linearization point. Leave the cached delta at
+  // zero so calculateEstimate() returns theta_ rather than immediately solving
+  // a clean local-only correction that would undo the temporary CBS update.
+  delta_ = theta_.zeroVectors();
+  deltaNewton_ = theta_.zeroVectors();
+  RgProd_ = theta_.zeroVectors();
+  deltaReplacedMask_.clear();
 }
 
 /* ************************************************************************* */
