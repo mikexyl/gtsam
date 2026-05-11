@@ -10,6 +10,13 @@ endif()
 
 # Switch for using system Eigen or GTSAM-bundled Eigen
 if(GTSAM_USE_SYSTEM_EIGEN)
+    set(GTSAM_SYSTEM_EIGEN3_DIR "/usr/share/eigen3/cmake" CACHE PATH
+        "System Eigen3 CMake config directory")
+    if(EXISTS "${GTSAM_SYSTEM_EIGEN3_DIR}/Eigen3Config.cmake")
+        set(Eigen3_DIR "${GTSAM_SYSTEM_EIGEN3_DIR}" CACHE PATH
+            "System Eigen3 CMake config directory" FORCE)
+    endif()
+
     # Since Eigen 3.3.0 a Eigen3Config.cmake is available so use it.
     find_package(Eigen3 CONFIG REQUIRED) # need to find again as REQUIRED
 
