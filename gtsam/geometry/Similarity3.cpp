@@ -122,32 +122,32 @@ Similarity3 Similarity3::Identity() {
   return Similarity3();
 }
 Similarity3 Similarity3::operator*(const Similarity3& S) const {
-  return Similarity3(R_ * S.R_, ((1.0 / S.s_) * t_) + R_ * S.t_, s_ * S.s_);
+  return Similarity3(R_ * S.R_, s_ * (R_ * S.t_) + t_, s_ * S.s_);
 }
 
 Similarity3 Similarity3::inverse() const {
   const Rot3 Rt = R_.inverse();
-  const Point3 sRt = Rt * (-s_ * t_);
-  return Similarity3(Rt, sRt, 1.0 / s_);
+  const Point3 inv_t = Rt * (-t_ / s_);
+  return Similarity3(Rt, inv_t, 1.0 / s_);
 }
 
 Point3 Similarity3::transformFrom(const Point3& p, //
     OptionalJacobian<3, 7> H1, OptionalJacobian<3, 3> H2) const {
-  const Point3 q = R_ * p + t_;
+  // New form: Q = s_ * R_ * p + t_
   if (H1) {
-    // For this derivative, see LieGroups.pdf
-    const Matrix3 sR = s_ * R_.matrix();
-    const Matrix3 DR = sR * skewSymmetric(-p.x(), -p.y(), -p.z());
-    *H1 << DR, sR, sR * p;
+    // Derivative for Q = s*R*p + t
+    const Matrix3 R = R_.matrix();
+    const Matrix3 DR = s_ * R * skewSymmetric(-p.x(), -p.y(), -p.z());
+    *H1 << DR, s_ * R, R * p;
   }
   if (H2)
-    *H2 = s_ * R_.matrix(); // just 3*3 sub-block of matrix()
-  return s_ * q;
+    *H2 = s_ * R_.matrix();
+  return s_ * (R_ * p) + t_;
 }
 
 Pose3 Similarity3::transformFrom(const Pose3& T) const {
   Rot3 R = R_.compose(T.rotation());
-  Point3 t = Point3(s_ * (R_ * T.translation() + t_));
+  Point3 t = Point3(s_ * (R_ * T.translation()) + t_);
   return Pose3(R, t);
 }
 
