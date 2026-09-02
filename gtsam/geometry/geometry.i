@@ -1111,8 +1111,11 @@ class Similarity3 {
   gtsam::Vector localCoordinates(const gtsam::Similarity3& t2) const;
 
   // Lie group
-  static gtsam::Similarity3 Expmap(gtsam::Vector v);
-  static gtsam::Vector Logmap(const gtsam::Similarity3& s);
+  static gtsam::Similarity3 Expmap(gtsam::Vector xi);
+  static gtsam::Vector Logmap(const gtsam::Similarity3& T);
+  static gtsam::Matrix7 LogmapDerivative(const gtsam::Vector7& xi);
+  static gtsam::Matrix7 LogmapDerivative(const gtsam::Similarity3& T);
+  static gtsam::Matrix7 ExpmapDerivative(const gtsam::Vector7& xi);
   gtsam::Similarity3 expmap(const gtsam::Vector& v);
   gtsam::Vector logmap(const gtsam::Similarity3& g);
 

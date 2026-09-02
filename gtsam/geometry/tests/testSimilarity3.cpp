@@ -276,6 +276,114 @@ TEST(Similarity3, ExpLogMap) {
   EXPECT(assert_equal(expZero, ident));
 }
 
+/* ************************************************************************* */
+namespace bernoulli_jacobians {
+
+std::vector<Vector7> testTangents() {
+  return {
+      Vector7::Zero(),
+      Vector7(1e-8, -2e-8, 3e-8, -4e-8, 5e-8, -6e-8, 2e-8),
+      Vector7(0.3, -0.2, 0.4, 0.0, 0.0, 0.0, 0.0),
+      Vector7(0.0, 0.0, 0.0, 1.0, -0.7, 0.5, 0.0),
+      Vector7(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.5),
+      Vector7(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, -0.5),
+      Vector7(0.2, -0.3, 0.1, 0.6, -0.2, 0.8, 0.25),
+      Vector7(0.6, -0.4, 0.7, 1.0, -0.7, 0.5, -0.5),
+  };
+}
+
+// Verifies the public and optional Jacobians against numerical derivatives.
+TEST(Similarity3, ExpLogJacobians) {
+  const auto expmap = [](const Vector7& xi) { return Similarity3::Expmap(xi); };
+  const auto logmap = [](const Similarity3& T) {
+    return Similarity3::Logmap(T);
+  };
+
+  for (const Vector7& xi : testTangents()) {
+    Matrix7 Hexpmap, Hlogmap;
+    const Similarity3 T = Similarity3::Expmap(xi, Hexpmap);
+    const Vector7 recovered = Similarity3::Logmap(T, Hlogmap);
+
+    const Matrix7 expectedHexpmap = Similarity3::ExpmapDerivative(xi);
+    const Matrix7 expectedHlogmap = Similarity3::LogmapDerivative(xi);
+    const Matrix7 numericalHexpmap =
+        numericalDerivative11<Similarity3, Vector7>(expmap, xi, 1e-6);
+    const Matrix7 numericalHlogmap =
+        numericalDerivative11<Vector7, Similarity3>(logmap, T, 1e-6);
+
+    EXPECT(assert_equal(xi, recovered, 1e-9));
+    EXPECT(assert_equal(expectedHexpmap, Hexpmap, 1e-12));
+    EXPECT(assert_equal(expectedHlogmap, Hlogmap, 1e-12));
+    EXPECT(
+        assert_equal(expectedHlogmap, Similarity3::LogmapDerivative(T), 1e-12));
+    EXPECT(assert_equal(numericalHexpmap, expectedHexpmap, 1e-5));
+    EXPECT(assert_equal(numericalHlogmap, expectedHlogmap, 1e-5));
+    EXPECT(assert_equal<Matrix7>(I_7x7, Hlogmap * Hexpmap, 1e-10));
+  }
+}
+
+}  // namespace bernoulli_jacobians
+/* ************************************************************************* */
+
+/* ************************************************************************* */
+namespace between_factor_similarity3 {
+
+// Verifies exact nonzero-residual Jacobians for both factor arguments.
+TEST(Similarity3, BetweenFactorJacobians) {
+  const Similarity3 value1 =
+      Similarity3::Expmap(Vector7(0.2, -0.1, 0.3, 0.8, -0.4, 0.5, 0.2));
+  const Similarity3 value2 =
+      Similarity3::Expmap(Vector7(-0.3, 0.4, 0.1, -0.2, 0.9, 0.3, -0.25));
+  const Similarity3 measurement = value1.between(value2).compose(
+      Similarity3::Expmap(Vector7(0.2, -0.15, 0.1, 0.3, -0.2, 0.25, 0.15)));
+  const auto model = noiseModel::Isotropic::Sigma(7, 0.1);
+  const BetweenFactor<Similarity3> factor(X(1), X(2), measurement, model);
+
+  const auto error = [&factor](const Similarity3& first,
+                               const Similarity3& second) -> Vector7 {
+    return factor.evaluateError(first, second);
+  };
+  Matrix H1, H2;
+  factor.evaluateError(value1, value2, H1, H2);
+  const Matrix7 numericalH1 =
+      numericalDerivative21<Vector7, Similarity3, Similarity3>(error, value1,
+                                                               value2, 1e-6);
+  const Matrix7 numericalH2 =
+      numericalDerivative22<Vector7, Similarity3, Similarity3>(error, value1,
+                                                               value2, 1e-6);
+
+  EXPECT(assert_equal(numericalH1, H1, 1e-5));
+  EXPECT(assert_equal(numericalH2, H2, 1e-5));
+}
+
+// Verifies an anchored two-node graph recovers known Sim(3) states.
+TEST(Similarity3, BetweenFactorOptimization) {
+  const Similarity3 expected1 =
+      Similarity3::Expmap(Vector7(0.15, -0.1, 0.2, 0.5, -0.3, 0.4, 0.1));
+  const Similarity3 expected2 =
+      Similarity3::Expmap(Vector7(-0.25, 0.3, 0.1, 1.0, 0.2, -0.6, -0.2));
+  const auto priorNoise = noiseModel::Isotropic::Sigma(7, 1e-4);
+  const auto betweenNoise = noiseModel::Isotropic::Sigma(7, 1e-3);
+
+  NonlinearFactorGraph graph;
+  graph.addPrior(X(1), expected1, priorNoise);
+  graph.emplace_shared<BetweenFactor<Similarity3>>(
+      X(1), X(2), expected1.between(expected2), betweenNoise);
+
+  Values initial;
+  initial.insert(X(1), expected1.retract(
+                           Vector7(0.08, -0.05, 0.04, 0.2, -0.1, 0.15, 0.05)));
+  initial.insert(X(2), expected2.retract(
+                           Vector7(-0.1, 0.06, -0.08, -0.25, 0.2, 0.1, -0.07)));
+
+  const Values result = LevenbergMarquardtOptimizer(graph, initial).optimize();
+  EXPECT(assert_equal(expected1, result.at<Similarity3>(X(1)), 1e-7));
+  EXPECT(assert_equal(expected2, result.at<Similarity3>(X(2)), 1e-7));
+}
+
+}  // namespace between_factor_similarity3
+/* ************************************************************************* */
+
 //******************************************************************************
 // Group action on Point3 (with simpler transform)
 TEST(Similarity3, GroupAction) {

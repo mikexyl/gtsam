@@ -342,26 +342,41 @@ struct LocalV : public so3::DexpFunctor {
 Matrix3 Similarity3::GetV(Vector3 w, double lambda) {
   return LocalV(w, lambda).V();
 }
+
+Matrix7 Similarity3::LogmapDerivative(const Vector7& xi) {
+  // Sixth-order Bernoulli series for the inverse right Jacobian.
+  const Matrix7 A = Similarity3::adjointMap(xi);
+  const Matrix7 A2 = A * A;
+  const Matrix7 A4 = A2 * A2;
+  const Matrix7 A6 = A4 * A2;
+  return I_7x7 + 0.5 * A + (1.0 / 12.0) * A2 - (1.0 / 720.0) * A4 +
+         (1.0 / 30240.0) * A6;
+}
+
+Matrix7 Similarity3::LogmapDerivative(const Similarity3& T) {
+  return Similarity3::LogmapDerivative(Similarity3::Logmap(T));
+}
+
+Matrix7 Similarity3::ExpmapDerivative(const Vector7& xi) {
+  return Similarity3::LogmapDerivative(xi).inverse();
+}
+
 Vector7 Similarity3::Logmap(const Similarity3& T, OptionalJacobian<7, 7> Hm) {
-  // To get the logmap, calculate w and lambda, then solve for u as shown by Ethan at
-  // www.ethaneade.org/latex2html/lie/node29.html
+  // To get the logmap, calculate w and lambda, then solve for u as shown by
+  // Ethan at www.ethaneade.org/latex2html/lie/node29.html
   const Vector3 w = Rot3::Logmap(T.R_);
   const double lambda = log(T.s_);
   Vector7 result;
   result << w, GetV(w, lambda).inverse() * T.t_, lambda;
-  if (Hm) {
-    throw std::runtime_error("Similarity3::Logmap: derivative not implemented");
-  }
+  if (Hm) *Hm = Similarity3::LogmapDerivative(result);
   return result;
 }
 
-Similarity3 Similarity3::Expmap(const Vector7& v, OptionalJacobian<7, 7> Hm) {
-  const auto w = v.head<3>();
-  const auto rho = v.segment<3>(3);
-  const double lambda = v[6];
-  if (Hm) {
-    throw std::runtime_error("Similarity3::Expmap: derivative not implemented");
-  }
+Similarity3 Similarity3::Expmap(const Vector7& xi, OptionalJacobian<7, 7> Hm) {
+  const auto w = xi.head<3>();
+  const auto rho = xi.segment<3>(3);
+  const double lambda = xi[6];
+  if (Hm) *Hm = Similarity3::ExpmapDerivative(xi);
   const LocalV local(w, lambda);
   const Matrix3 V = local.V();
 #ifdef GTSAM_USE_QUATERNIONS

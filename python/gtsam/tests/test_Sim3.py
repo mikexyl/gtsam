@@ -75,6 +75,23 @@ class TestSim3(GtsamTestCase):
         self.gtsamAssertEquals(self.S1.compose(S_id), self.S1)
         self.gtsamAssertEquals(S_id.compose(self.S1), self.S1)
 
+    def test_exp_log_jacobians(self) -> None:
+        """Test the wrapped Sim(3) Expmap and Logmap Jacobian helpers."""
+        xi = np.array([0.6, -0.4, 0.7, 1.0, -0.7, 0.5, -0.5])
+        transform = Similarity3.Expmap(xi)
+        logmap_jacobian = Similarity3.LogmapDerivative(xi)
+
+        np.testing.assert_allclose(
+            logmap_jacobian,
+            Similarity3.LogmapDerivative(transform),
+            atol=1e-12,
+        )
+        np.testing.assert_allclose(
+            logmap_jacobian @ Similarity3.ExpmapDerivative(xi),
+            np.eye(7),
+            atol=1e-10,
+        )
+
     def test_transform_from_point3(self):
         """Test Similarity3.transformFrom with a Point3."""
         p = Point3(2.0, 0.0, 1.0)

@@ -32,6 +32,22 @@
 
 namespace gtsam {
 
+class Similarity3;
+
+namespace internal {
+
+template <class VALUE>
+struct UseExactBetweenFactorLocalJacobian {
+  static constexpr bool value = false;
+};
+
+template <>
+struct UseExactBetweenFactorLocalJacobian<Similarity3> {
+  static constexpr bool value = true;
+};
+
+}  // namespace internal
+
   /**
    * A class for a measurement predicted by "between(config[key1],config[key2])"
    * @tparam VALUE the Value type
@@ -115,14 +131,21 @@ namespace gtsam {
       T hx = traits<T>::Between(p1, p2, H1, H2); // h(x)
       // manifold equivalent of h(x)-z -> log(z,h(x))
 #ifdef GTSAM_SLOW_BUT_CORRECT_BETWEENFACTOR
-      typename traits<T>::ChartJacobian::Jacobian Hlocal;
-      Vector rval = traits<T>::Local(measured_, hx, OptionalNone, (H1 || H2) ? &Hlocal : 0);
-      if (H1) *H1 = Hlocal * (*H1);
-      if (H2) *H2 = Hlocal * (*H2);
-      return rval;
+      constexpr bool kUseExactLocalJacobian = true;
 #else
-      return traits<T>::Local(measured_, hx);
+      constexpr bool kUseExactLocalJacobian =
+          internal::UseExactBetweenFactorLocalJacobian<T>::value;
 #endif
+      if constexpr (kUseExactLocalJacobian) {
+        typename traits<T>::ChartJacobian::Jacobian localJacobian;
+        Vector error = traits<T>::Local(measured_, hx, OptionalNone,
+                                        (H1 || H2) ? &localJacobian : nullptr);
+        if (H1) *H1 = localJacobian * (*H1);
+        if (H2) *H2 = localJacobian * (*H2);
+        return error;
+      } else {
+        return traits<T>::Local(measured_, hx);
+      }
     }
 
     /// @}
